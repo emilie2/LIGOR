@@ -1,0 +1,1011 @@
+---
+title: "ligoplots"
+output: html_document
+---
+
+
+##
+## Begin emilie2 code
+##
+```{r setup, include=TRUE}
+#knitr::opts_chunk$set(echo = TRUE)
+#library(knitr)
+#library(runr)
+#py = proc_python(22222)
+#py$start()
+#knit_engines$set(python = function(options) {
+#    knitr:::wrap(py$exec(options$code), options)
+#})
+#opts_chunk$set(engine='python') 
+# all the codes in the following chunks will be run in pyhton
+
+#installIfNeeded(c("dplyr",
+#                  "jsonlite"))
+library(dplyr)
+library(jsonlite)
+library(ggplot2)
+library(lattice)
+library(gridExtra)
+library(XML)
+library(xml2)
+library(psd)
+library(bspec)
+library(numDeriv)
+library(signal)
+
+```
+
+```{r event selection}
+#-- SET ME   Tutorial should work with most binary black hole events
+#-- Default is no event selection; you MUST select one to proceed.
+#eventname = ''
+ eventname = 'GW150914' 
+# eventname = 'GW151226' 
+# eventname = 'LVT151012'
+
+# want plots?
+make_plots = 1
+plottype = "png"
+#plottype = "pdf"
+```
+
+# In[21]:
+
+# Standard python numerical analysis imports:
+#import numpy as np
+#from scipy import signal
+#from scipy.interpolate import interp1d
+#from scipy.signal import butter, filtfilt, iirdesign, zpk2tf, freqz
+#import h5py
+#import json
+
+# the IPython magic below must be commented out in the .py file, since it doesn't work there.
+#%matplotlib inline
+#%config InlineBackend.figure_format = 'retina'
+#import matplotlib.pyplot as plt
+#import matplotlib.mlab as mlab
+
+# LIGO-specific readligo.py 
+#import readligo as rl
+
+
+# you might get a matplotlib warning here; you can ignore it.
+
+
+# ### Read the event properties from a local json file (download in advance):
+
+# In[22]:
+
+# Read the event properties from a local json file
+#fnjson = "O1_events.json"
+```{r event properties from json}
+#fnjson <- fromJSON("O1_events.json")
+events <- fromJSON("O1_events.json")
+#fnjson <- stream_in(file("O1_events.json"))
+#try:
+  #  events = json.load(open(fnjson,"r"))
+#except IOError:
+#    print("Cannot find resource file "+fnjson)
+#    print("You can download it from https://losc.ligo.org/s/events/"+fnjson)
+#    print("Quitting.")
+#    quit()
+
+# did the user select the eventname ?
+#try: 
+#    events[eventname]
+#except:
+#    print('You must select an eventname that is in '+fnjson+'! Quitting.')
+#    quit()
+```
+
+# In[4]:
+```{r extract parameters}
+# Extract the parameters for the desired event:
+event = events[eventname]
+fn_H1 = event[[1]]$fn_H1              # File name for H1 data
+#events$eventname$fn_H1
+fn_L1 = event[[1]]$fn_L1           # File name for L1 data
+#fn_L1 = event['fn_L1']              # File name for L1 data
+#fn_template = event['fn_template']  # File name for template waveform
+fn_template = event[[1]]$fn_template  # File name for template waveform
+#fs = event['fs']                    # Set sampling rate
+fs = event[[1]]$fs                    # Set sampling rate
+#tevent = event['tevent']            # Set approximate event GPS time
+tevent = event[[1]]$tevent            # Set approximate event GPS time
+#fband = event['fband']              # frequency band for bandpassing signal
+fband = event[[1]]$fband              # frequency band for bandpassing signal
+print("Reading in parameters for event ")
+print(event[[1]]$name)
+print(event)
+```
+
+```{r read data}
+# ## Read in the data
+# We will make use of the data, and waveform template, defined above.
+
+# In[5]:
+
+#----------------------------------------------------------------
+# Load LIGO data from a single file.
+# FIRST, define the filenames fn_H1 and fn_L1, above.
+#----------------------------------------------------------------
+#try:
+    # read in data from H1 and L1, if available:
+ #   strain_H1, time_H1, chan_dict_H1 = rl.loaddata(fn_H1, 'H1')
+strain_H1 <- loaddata(fn_H1, 'H1')[[1]]
+time_H1 <- loaddata(fn_H1, 'H1')[[2]]
+ #   strain_L1, time_L1, chan_dict_L1 = rl.loaddata(fn_L1, 'L1')
+strain_L1 <- loaddata(fn_L1, 'L1')[[1]]
+time_L1 <- loaddata(fn_L1, 'L1')[[2]]
+#except:
+#    print("Cannot find data files!")
+#    print("You can download them from https://losc.ligo.org/s/events/"+eventname)
+#    print("Quitting.")
+#    quit()
+```
+
+# ## Data Gaps
+# **NOTE** that in general, LIGO strain time series data has gaps (filled with NaNs) when the detectors are not taking valid ("science quality") data. Analyzing these data requires the user to 
+#  <a href='https://losc.ligo.org/segments/'>loop over "segments"</a> of valid data stretches. 
+# 
+# **In this tutorial, for simplicity, we assume there are no data gaps - this will not work for all times!**  See the 
+# <a href='https://losc.ligo.org/segments/'>notes on segments</a> for details.
+# 
+
+```{r First look}
+
+# ## First look at the data from H1 and L1
+
+# In[6]:
+
+# both H1 and L1 will have the same time vector, so:
+time = time_H1
+# the time sample interval (uniformly sampled!)
+dt = time[2] - time[1]
+
+# Let's look at the data and print out some stuff:
+
+print("time_H1: length, min, mean, max = ")
+print(c(length(time_H1), min(time_H1), mean(time_H1), max(time_H1)))
+print("strain_H1: length, min, mean, max = ")
+print(c(length(strain_H1[[1]]), min(as.numeric(strain_H1[[1]])),mean(as.numeric(strain_H1[[1]])),max(as.numeric(strain_H1[[1]]))))
+print("strain_L1: length, min, mean, max = ")
+print(c(length(strain_L1[[1]]), min(as.numeric(strain_L1[[1]])),mean(as.numeric(strain_L1[[1]])),max(as.numeric(strain_L1[[1]]))))
+
+#What's in chan_dict?  (See also https://losc.ligo.org/tutorials/)
+#bits = chan_dict_H1['DATA']
+#print("For H1, {0} out of {1} seconds contain usable DATA".format(bits.sum(), len(bits)))
+#bits = chan_dict_L1['DATA']
+#print("For L1, {0} out of {1} seconds contain usable DATA".format(bits.sum(), len(bits)))
+ 
+```
+
+# In[7]:
+```{r deltat plot}
+# plot +- deltat seconds around the event:
+# index into the strain time series for this time interval:
+deltat = 5
+#deltat = 3
+#indxt = where((time >= tevent-deltat) & (time < tevent+deltat))
+indxt = which((time >= tevent-deltat) & (time < tevent+deltat))
+print(tevent)
+indexed_time = time[indxt]-tevent
+#for (i in indxt[[1]]:indxt[[length(indxt)]]){
+#  indexed_strain_H1[i] = strain_H1[[i]]
+#}
+indexed_strain_H1 = strain_H1[[1]][indxt]
+indexed_strain_L1 = strain_L1[[1]][indxt]
+dataframe = data.frame(indexed_time, indexed_strain_H1, indexed_strain_L1)
+#dataframe1 = data.frame(indexed_time, indexed_strain_H1)
+#dataframe2 = data.frame(indexed_time, indexed_strain_L1)
+
+if (make_plots){
+  #create a smaller dataset for testing
+  set.seed(2017)
+  dsmall <- dataframe[sample(nrow(dataframe),1000),] 
+#p1 <- qplot(time[indxt]-tevent, strain_H1[indxt], geom="auto", col = 'r')
+ # p1 <- qplot(time[indxt]-tevent, strain_H1[indxt])
+ # p1 <- qplot(dataframe$indexed_time)
+ #p1 <- qplot(indexed_time, indexed_strain_H1,data = dataframe, color = 'red', xlim = c(indexed_time[1],indexed_time[length(indxt)]))
+  xlabel = as.character(c("time (s) since ", str(tevent)))
+  ylabel = "strain"
+  title = as.character(c("Advanced LIGO strain data near ",eventname))
+#  p1 <- qplot(indexed_time, indexed_strain_H1,data = dsmall, color = 'red', xlab = xlabel, ylab = ylabel, main = title)
+#  p1 <- qplot(indexed_strain_H1,data = dataframe1, color = 'red', xlab = xlabel, ylab = ylabel, main = title)
+  #p1
+# p2 <- qplot(indexed_time, indexed_strain_L1,data = dsmall, color = 'green')
+#  p1 <- ggplot(dsmall, aes(indexed_time, as.numeric(indexed_strain_H1))) + geom_point() 
+#  p1 <- ggplot(dataframe, aes(indexed_time, as.numeric(indexed_strain_H1))) + geom_point() 
+  p1 <- ggplot(dataframe, aes(indexed_time, as.numeric(indexed_strain_H1))) + geom_line() 
+ print(p1) 
+  #+ scale_y_continuous(breaks = c(1:3))
+#  p2 <- ggplot(dsmall, aes(indexed_time, as.numeric(indexed_strain_L1))) + geom_point() 
+#  p2 <- ggplot(dataframe, aes(indexed_time, as.numeric(indexed_strain_L1))) + geom_point() 
+ p2 <- ggplot(dataframe, aes(indexed_time, as.numeric(indexed_strain_L1))) + geom_line() 
+  print(p2)
+  #+ scale_y_continuous(breaks = c(1:3))
+# p1 <- ggplot(dataframe1, aes(indexed_time, indexed_strain_H1), colour = 'red')
+# p2 <- ggplot(dataframe2, aes(indexed_time, indexed_strain_L1), colour = 'red')
+  #p1
+# p2 <- qplot(indexed_time, indataframe, geom="auto")
+## Explicit invocation
+#p2 <- qplot(time[indxt]-tevent, strain_L1[indxt], geom="auto", col = 'g')
+#plot <- grid.arrange(p1, p2, nrow=2)
+  
+  
+#ggsave("plot.png")
+
+#    plt.figure()
+#    plt.plot(time[indxt]-tevent,strain_H1[indxt],'r',label='H1 strain')
+#    plt.plot(time[indxt]-tevent,strain_L1[indxt],'g',label='L1 strain')
+#    plt.xlabel('time (s) since '+str(tevent))
+#    plt.ylabel('strain')
+#    plt.legend(loc='lower right')
+#    plt.title('Advanced LIGO strain data near '+eventname)
+#    plt.savefig(eventname+'_strain.'+plottype)
+}
+```
+
+# The data are dominated by **low frequency noise**; there is no way to see a signal here, without some signal processing.
+
+# ## Plot the Amplitude Spectral Density (ASD)
+# Plotting these data in the Fourier domain gives us an idea of the frequency content of the data. A way to visualize the frequency content of the data is to plot the amplitude spectral density, ASD.
+# 
+# The ASDs are the square root of the power spectral densities (PSDs), which are averages of the square of the fast fourier transforms (FFTs) of the data.
+# 
+# They are an estimate of the "strain-equivalent noise" of the detectors versus frequency,
+# which limit the ability of the detectors to identify GW signals.
+# 
+# They are in units of strain/rt(Hz).
+# So, if you want to know the root-mean-square (rms) strain noise in a frequency band,
+# integrate (sum) the squares of the ASD over that band, then take the square-root.
+# 
+# There's a signal in these data! 
+# For the moment, let's ignore that, and assume it's all noise.
+
+# In[8]:
+```{r fast fourier transform}
+#make_psds = 1
+#if make_psds:
+    # number of sample for the fast fourier transform:
+    NFFT = fs*4
+seglength = length(strain_H1[[1]])/NFFT
+#NFFT = fs
+   # Pxx_H1, freqs = mlab.psd(strain_H1, Fs = fs, NFFT = NFFT)
+  #  Pxx_L1, freqs = mlab.psd(strain_L1, Fs = fs, NFFT = NFFT)
+#psdcore(strain_H1, X.frq = fs, ntaper = NFFT)
+strain_H1_ts <- as.ts(as.numeric(strain_H1[[1]]), frequency = fs)
+strain_L1_ts <- as.ts(as.numeric(strain_L1[[1]]), frequency = fs)
+
+psdcore_H1 <- welchPSD(strain_H1_ts, seglength=NFFT, windowingPsdCorrection = FALSE)
+psdcore_L1 <- welchPSD(strain_L1_ts, seglength=NFFT, windowingPsdCorrection = FALSE)
+
+#Pxx_H1 <- psdcore_H1$spec
+Pxx_H1 <- psdcore_H1$power/fs
+freqs_H1 <- psdcore_H1$frequency*fs
+#psdcore_L1 <- psdcore(X.d=as.numeric(strain_L1[[1]]), X.frq = fs, ntaper = NFFT)
+#psdcore_L1 <- spectrum(x=as.numeric(strain_L1[[1]]), x.frq = fs, niter = NFFT)
+#psdcore_L1 <- pspectrum(as.numeric(strain_L1[[1]]), x.frqsamp = fs, ntap.init = NFFT, niter = 1)
+#psdcore_L1 <- pspectrum(strain_L1_num, x.frqsamp = fs, niter = NFFT)
+#psdcore_L1 <- pspectrum(as.numeric(strain_L1[[1]]), x.frqsamp = NFFT)
+#Pxx_L1 <- psdcore_L1$spec
+Pxx_L1 <- psdcore_L1$power/fs
+freqs_L1 <- psdcore_L1$frequency*fs
+    # We will use interpolations of the ASDs computed above for whitening:
+  #  psd_H1 = interp1d(freqs, Pxx_H1)
+  #  psd_L1 = interp1d(freqs, Pxx_L1)
+psd_H1 = approxfun(freqs_H1, Pxx_H1)
+psd_L1 = approxfun(freqs_L1, Pxx_L1)
+#psd_H1 = interp(Pxx_H1, NFFT)
+#psd_L1 = interp(Pxx_L1, NFFT)
+#since freqs_H1 and freqs_L1 are equal
+freqs = freqs_L1
+    # Here is an approximate, smoothed PSD for H1 during O1, with no lines. We'll use it later.    
+    Pxx = (1.e-22*(18./(0.1+freqs))**2)**2+0.7e-23**2+((freqs/2000.)*4.e-23)**2
+ #   psd_smooth = interp1d(freqs, Pxx)
+    psd_smooth = approxfun(freqs, Pxx)
+    
+    #interpolate.fft???
+
+#if make_plots:
+    # plot the ASDs, with the template overlaid:
+ #   Pxx_df <- data.frame(1/freqs, Pxx_H1, Pxx_L1, Pxx)
+     Pxx_df <- data.frame(freqs, Pxx_H1, Pxx_L1, Pxx)
+    f_min = 20
+    f_max = 2000 
+ # p3 <- ggplot(Pxx_df, aes(freqs, y=value)) +  scale_x_continuous(limits = c(f_min, f_max)) + scale_x_log10(limits = c(f_min, f_max)) + scale_y_log10()  + geom_point(aes(y=sqrt(Pxx_H1), col=Pxx_H1)) + geom_point(aes(y=sqrt(Pxx_L1), col=Pxx_L1)) + geom_line(aes(y=sqrt(Pxx), col=Pxx))
+    p3 <- ggplot(Pxx_df, aes(freqs, y=value)) + scale_x_log10(limits = c(f_min, f_max)) + scale_y_log10()  + geom_line(aes(y=sqrt(Pxx_H1))) + geom_line(aes(y=sqrt(Pxx_L1))) + geom_line(aes(y=sqrt(Pxx)))
+                 #++ ggplot(Pxx_df, aes(freqs, sqrt(Pxx_L1))) + geom_point() + scale_x_log10() + scale_x_continuous(limits = c(f_min, f_max)) + ggplot(Pxx_df, aes(freqs, sqrt(Pxx))) + geom_line() + scale_x_log10() + scale_x_continuous(limits = c(f_min, f_max))
+ print(p3) 
+# p4 <- ggplot(Pxx_df, aes(freqs, sqrt(Pxx_L1))) + geom_point() + scale_x_log10() + scale_x_continuous(limits = c(f_min, f_max))
+# print(p4) 
+#    plt.figure(figsize=(10,8))
+#    plt.loglog(freqs, np.sqrt(Pxx_L1),'g',label='L1 strain')
+#    plt.loglog(freqs, np.sqrt(Pxx_H1),'r',label='H1 strain')
+#    plt.loglog(freqs, np.sqrt(Pxx),'k',label='H1 strain, O1 smooth model')
+#    plt.axis([f_min, f_max, 1e-24, 1e-19])
+ #   plt.grid('on')
+#    plt.ylabel('ASD (strain/rtHz)')
+#    plt.xlabel('Freq (Hz)')
+ #   plt.legend(loc='upper center')
+#    plt.title('Advanced LIGO strain data near '+eventname)
+ #   plt.savefig(eventname+'_ASDs.'+plottype)
+```
+
+# NOTE that we only plot the data between f_min = 20 Hz and f_max = 2000 Hz.
+# 
+# Below f_min, the data **are not properly calibrated**. That's OK, because the noise is so high below f_min that LIGO cannot sense gravitational wave strain from astrophysical sources in that band.
+# 
+# The sample rate is fs = 4096 Hz (2^12 Hz), so the data cannot capture frequency content above the Nyquist frequency = fs/2 = 2048 Hz. That's OK, because our events only have detectable frequency content in the range given by fband, defined above; the upper end will (almost) always be below the Nyquist frequency. We set f_max = 2000, a bit below Nyquist.
+# 
+# You can see strong spectral lines in the data; they are all of instrumental origin. Some are engineered into the detectors (mirror suspension resonances at ~500 Hz and harmonics, calibration lines, control dither lines, etc) and some (60 Hz and harmonics) are unwanted. We'll return to these, later.
+# 
+# You can't see the signal in this plot, since it is relatively weak and less than a second long, while this plot averages over 32 seconds of data. So this plot is entirely dominated by instrumental noise.
+# 
+# The smooth model is hard-coded and tuned by eye; it won't be right for arbitrary times. We will only use it below for things that don't require much accuracy.
+
+# ## Binary Neutron Star (BNS) detection range
+# 
+# A standard metric that LIGO uses to evaluate the sensitivity of our detectors, based on the detector noise ASD, is the BNS range.
+# 
+# This is defined as the distance to which a LIGO detector can register a BNS signal with a signal-to-noise ratio (SNR) of 8, averaged over source direction and orientation.
+# 
+# We take each neutron star in the BNS system to have a mass of 1.4 times the mass of the sun, and negligible spin.
+# 
+# We have found from experience (supported by careful calculations) that detector noise produces false signals with SNRs that fall off exponentially; only above an SNR of around 8 is it possible to identify a signal above the detector noise.
+# 
+# GWs from BNS mergers are like "standard sirens"; we know their amplitude at the source from theoretical calculations. The amplitude falls off like 1/r, so their amplitude at the detectors on Earth tells us how far away they are. This is great, because it is hard, in general, to know the distance to astronomical sources.
+# 
+# The amplitude at the source is computed in the post-Newtonian "quadrupole approximation". This is valid for the inspiral phase only, and is approximate at best; there is no simple expression for the post-inspiral (merger and ringdown) phase. So this won't work for high-mass binary black holes like GW150914, which have a lot of signal strength in the post-inspiral phase.
+# 
+# But, in order to use them as standard sirens, we need to know the source direction and orientation relative to the detector and its "quadrupole antenna pattern" response to such signals. It is a standard (if non-trivial) computation to average over all source directions and orientations; the average amplitude is 1./2.2648 times the maximum value. 
+# 
+# This calculation is described in Appendix D of:
+# FINDCHIRP: An algorithm for detection of gravitational waves from inspiraling compact binaries
+# B. Allen et al., PHYSICAL REVIEW D 85, 122006 (2012) ; http://arxiv.org/abs/gr-qc/0509116
+# 
+
+# In[9]:
+```{r bns range}
+#BNS_range = 1
+#if BNS_range:
+    #-- compute the binary neutron star (BNS) detectability range
+
+    #-- choose a detector noise power spectrum:
+    f = freqs
+    # get frequency step size
+    df = f[2]-f[1]
+
+    #-- constants
+    # speed of light:
+    clight = 2.99792458e8                # m/s
+    # Newton's gravitational constant
+    G = 6.67259e-11                      # m^3/kg/s^2 
+    # one parsec, popular unit of astronomical distance (around 3.26 light years)
+    parsec = 3.08568025e16               # m
+    # solar mass
+    MSol = 1.989e30                      # kg
+    # solar mass in seconds (isn't relativity fun?):
+    tSol = MSol*G/(clight^3)     # s
+    # Single-detector SNR for detection above noise background: 
+    SNRdet = 8.0
+    # conversion from maximum range (horizon) to average range:
+    Favg = 2.2648
+    # mass of a typical neutron star, in solar masses:
+    mNS = 1.4
+
+    # Masses in solar masses
+    m1 = m2 = mNS    
+    mtot = m1+m2  # the total mass
+    eta = (m1*m2)/mtot^2  # the symmetric mass ratio
+    mchirp = mtot*eta^(3.0/5.0)  # the chirp mass (FINDCHIRP, following Eqn 3.1b)
+
+    # distance to a fiducial BNS source:
+    dist = 1.0                           # in Mpc
+    Dist =  dist * 1.0e6 * parsec /clight # from Mpc to seconds
+
+    # We integrate the signal up to the frequency of the "Innermost stable circular orbit (ISCO)" 
+    R_isco = 6.0      # Orbital separation at ISCO, in geometric units. 6M for PN ISCO; 2.8M for EOB 
+    # frequency at ISCO (end the chirp here; the merger and ringdown follow) 
+    f_isco = 1.0/(R_isco^1.5*pi*tSol*mtot)
+    # minimum frequency (below which, detector noise is too high to register any signal):
+    f_min = 20.0 # Hz
+    # select the range of frequencies between f_min and fisco
+   # fr = np.nonzero(np.logical_and(f > f_min , f < f_isco))
+    fr = which(f > f_min & f < f_isco, arr.ind=T)
+    # get the frequency and spectrum in that range:
+    ffr = f[fr]
+
+    # In stationary phase approx, this is htilde(f):  
+    # See FINDCHIRP Eqns 3.4, or 8.4-8.5 
+    htilde = (2.0*tSol/Dist)*mchirp^(5.0/6.0)*sqrt(5.0/96.0/pi)*(pi*tSol)
+    htilde = htilde*(pi*tSol*ffr)^(-7.0/6.0)
+    htilda2 = htilde^2
+  
+    # loop over the detectors
+    
+    dets = c('H1', 'L1')
+    for (det in dets){
+        if (det=='L1')
+        { 
+          sspec = Pxx_L1
+        }else{           
+          sspec = Pxx_H1
+          }
+        sspecfr = sspec[fr]
+        # compute "inspiral horizon distance" for optimally oriented binary; FINDCHIRP Eqn D2:
+        D_BNS = sqrt(4.0*sum(htilda2/sspecfr)*df)/SNRdet
+        # and the "inspiral range", averaged over source direction and orientation:
+        R_BNS = D_BNS/Favg
+        print(det)
+        print(' BNS inspiral horizon =') 
+        print(D_BNS)
+        print('BNS inspiral range   = ')
+        print(R_BNS)
+    }
+```
+
+# ## BBH range is >> BNS range!
+# 
+# NOTE that, since mass is the source of gravity and thus also of gravitational waves, systems with higher masses (such as the binary black hole merger GW150914) are much "louder" and can be detected to much higher distances than the BNS range. We'll compute the BBH range, using a template with specific masses, below.
+
+# ## Whitening
+# 
+# From the ASD above, we can see that the data are very strongly "colored" - noise fluctuations are much larger at low and high frequencies and near spectral lines, reaching a roughly flat ("white") minimum in the band around 80 to 300 Hz.
+# 
+# We can "whiten" the data (dividing it by the noise amplitude spectrum, in the fourier domain), suppressing the extra noise at low frequencies and at the spectral lines, to better see the weak signals in the most sensitive band.
+# 
+# Whitening is always one of the first steps in astrophysical data analysis (searches, parameter estimation).
+# Whitening requires no prior knowledge of spectral lines, etc; only the data are needed.
+# 
+# To get rid of remaining high frequency noise, we will also bandpass the data.
+# 
+# The resulting time series is no longer in units of strain; now in units of "sigmas" away from the mean.
+# 
+# We will plot the whitened strain data, along with the signal template, after the matched filtering section, below.
+
+# In[10]:
+
+# function to whiten data
+#def whiten(strain, interp_psd, dt):
+#    Nt = len(strain)
+#    freqs = np.fft.rfftfreq(Nt, dt)
+
+#    # whitening: transform to freq domain, divide by asd, then transform back, 
+#    # taking care to get normalization right.
+#    hf = np.fft.rfft(strain)
+#    white_hf = hf / (np.sqrt(interp_psd(freqs) /dt/2.))
+#    white_ht = np.fft.irfft(white_hf, n=Nt)
+#    return white_ht
+```{r whiten data}
+#whiten_data = 1
+#if whiten_data:
+    # now whiten the data from H1 and L1, and the template (use H1 PSD):
+    strain_H1_whiten = whiten(strain_H1_num, psd_H1,dt)
+    strain_L1_whiten = whiten(strain_L1_num, psd_L1,dt)
+    
+    # We need to suppress the high frequency noise (no signal!) with some bandpassing:
+  #  bb, ab = butter(4, [fband[0]*2./fs, fband[1]*2./fs], btype='band')
+    bb = butter(4, c(fband[0]*2./fs, fband[1]*2./fs), type="pass")$b
+    ab = butter(4, c(fband[0]*2./fs, fband[1]*2./fs), type="pass")$a
+    strain_H1_whitenbp = filtfilt(bb, ab, strain_H1_whiten)
+    strain_L1_whitenbp = filtfilt(bb, ab, strain_L1_whiten)
+```
+
+# ## Spectrograms
+# 
+# Now let's plot a short time-frequency spectrogram around our event:
+
+# In[11]:
+```{r spectrograms}
+#if make_plots:
+    # index into the strain time series for this time interval:
+  #  indxt = np.where((time >= tevent-deltat) & (time < tevent+deltat))
+#indxt = where((time >= tevent-deltat) & (time < tevent+deltat))
+indxt = which((time >= tevent-deltat) & (time < tevent+deltat))
+
+    # pick a shorter FTT time interval, like 1/8 of a second:
+    NFFT = as.integer(fs/8)
+    # and with a lot of overlap, to resolve short-time features:
+    NOVL = as.integer(NFFT*15./16)
+    # and choose a window that minimizes "spectral leakage" 
+    # (https://en.wikipedia.org/wiki/Spectral_leakage)
+    window = blackman(NFFT)
+
+    # the right colormap is all-important! See:
+    # http://matplotlib.org/examples/color/colormaps_reference.html
+    # viridis seems to be the best for our purposes, but it's new; if you don't have it, you can settle for ocean.
+    #spec_cmap='viridis'
+    spec_cmap='ocean'
+    
+    spec_df = data.frame(indexed_time, indexed_strain_H1, indexed_strain_L1)
+    # Plot the H1 spectrogram:
+    #p4 <- ggplot(spec_df, aes(indexed_time, indexed_strain_H1)) + geom_bin2d()
+    p4 <- specgram(as.numeric(indexed_strain_H1), n=NFFT, Fs=fs, window=window, 
+                                          overlap=NOVL)
+                   #, cmap=spec_cmap, xextent=[-deltat,deltat])
+ #   p4 <- spectrogram(as.numeric(indexed_strain_H1), nlevels=NFFT, fs=fs, window=window, maxfreq = 500)
+    print(p4)
+    
+    p5 <- specgram(as.numeric(indexed_strain_L1), n=NFFT, Fs=fs, window=window,  overlap=NOVL)
+    print(p5)
+  #  plt.figure(figsize=(10,6))
+  #  spec_H1, freqs, bins, im = plt.specgram(strain_H1[indxt], NFFT=NFFT, Fs=fs, window=window, 
+  #                                          noverlap=NOVL, cmap=spec_cmap, xextent=[-deltat,deltat])
+  #  plt.xlabel('time (s) since '+str(tevent))
+  #  plt.ylabel('Frequency (Hz)')
+  #  plt.colorbar()
+  #  plt.axis([-deltat, deltat, 0, 2000])
+  #  plt.title('aLIGO H1 strain data near '+eventname)
+  #  plt.savefig(eventname+'_H1_spectrogram.'+plottype)
+
+    # Plot the L1 spectrogram:
+  #  plt.figure(figsize=(10,6))
+  #  spec_H1, freqs, bins, im = plt.specgram(strain_L1[indxt], NFFT=NFFT, Fs=fs, window=window, 
+  #                                          noverlap=NOVL, cmap=spec_cmap, xextent=[-deltat,deltat])
+  #  plt.xlabel('time (s) since '+str(tevent))
+  #  plt.ylabel('Frequency (Hz)')
+  #  plt.colorbar()
+  #  plt.axis([-deltat, deltat, 0, 2000])
+  #  plt.title('aLIGO L1 strain data near '+eventname)
+  #  plt.savefig(eventname+'_L1_spectrogram.'+plottype)
+```
+
+# In the above spectrograms, you may see lots of excess power below ~20 Hz, as well as strong spectral lines at 500, 1000, 1500 Hz (also evident in the ASDs above). The lines at multiples of 500 Hz are the harmonics of the "violin modes" of the fibers holding up the mirrors of the Advanced LIGO interferometers.
+# 
+# Now let's zoom in on where we think the signal is, using the whitened data, in the hope of seeing a chirp:
+
+# In[12]:
+```{r}
+#if make_plots:
+
+
+  indxt = which((time >= tevent-deltat) & (time < tevent+deltat))
+  print(tevent)
+  indexed_time = time[indxt]-tevent
+#for (i in indxt[[1]]:indxt[[length(indxt)]]){
+#  indexed_strain_H1[i] = strain_H1[[i]]
+#}
+  indexed_strain_H1_whiten = strain_H1_whiten[indxt]
+  indexed_strain_L1_whiten = strain_L1_whiten[indxt]
+  whiten_df = data.frame(indexed_time, indexed_strain_H1_whiten, indexed_strain_L1_whiten)
+    #  plot the whitened data, zooming in on the signal region:
+
+    # pick a shorter FTT time interval, like 1/16 of a second:
+    NFFT = as.integer(fs/16.0)
+    # and with a lot of overlap, to resolve short-time features:
+    NOVL = as.integer(NFFT*15/16.0)
+    # choose a window that minimizes "spectral leakage" 
+    # (https://en.wikipedia.org/wiki/Spectral_leakage)
+    window = blackman(NFFT)
+
+    # Plot the H1 whitened spectrogram around the signal
+#    p6 <- specgram(strain_H1_whiten, n=NFFT, Fs=fs, window=window, 
+ #                                          overlap=NOVL)
+#     print(p6)
+    
+    #idx = (f >= 0 & f <= 500)
+    p6 <- specgram(as.numeric(indexed_strain_H1_whiten), n=NFFT, Fs=fs, window=window, 
+                                           overlap=NOVL)
+    
+  #  idx = which(p6$f >= 0 & p6$f <= 500)
+    
+  #  p6$f <- p6$f[idx]
+  #  z <- Re(p6$S)
+  #  image(p6$f, p6$t, z, xlim = c(1,length(idx)))
+     print(p6)
+     p7 <- specgram(as.numeric(indexed_strain_L1_whiten), n=NFFT, Fs=fs, window=window, 
+                                           overlap=NOVL)
+     print(p7)
+  #  plt.figure(figsize=(10,6))
+  #  spec_H1, freqs, bins, im = plt.specgram(strain_H1_whiten[indxt], NFFT=NFFT, Fs=fs, window=window, 
+                                     #       noverlap=NOVL, cmap=spec_cmap, xextent=[-deltat,deltat])
+  #  plt.xlabel('time (s) since '+str(tevent))
+  #  plt.ylabel('Frequency (Hz)')
+  #  plt.colorbar()
+  #  plt.axis([-0.5, 0.5, 0, 500])
+  #  plt.title('aLIGO H1 strain data near '+eventname)
+   # plt.savefig(eventname+'_H1_spectrogram_whitened.'+plottype)
+
+    # Plot the L1 whitened spectrogram around the signal
+  #  plt.figure(figsize=(10,6))
+  #  spec_H1, freqs, bins, im = plt.specgram(strain_L1_whiten[indxt], NFFT=NFFT, Fs=fs, window=window, 
+  #                                          noverlap=NOVL, cmap=spec_cmap, xextent=[-deltat,deltat])
+   # plt.xlabel('time (s) since '+str(tevent))
+  #  plt.ylabel('Frequency (Hz)')
+   # plt.colorbar()
+  #  plt.axis([-0.5, 0.5, 0, 500])
+   # plt.title('aLIGO L1 strain data near '+eventname)
+  #  plt.savefig(eventname+'_L1_spectrogram_whitened.'+plottype)
+```
+
+# Loud (high SNR) signals may be visible in these spectrograms.  Compact object mergers show a characteristic "chirp" as the signal rises in frequency.  If you can't see anything, try
+# <a href='https://losc.ligo.org/events/GW150914/'>event GW150914</a>, by changing the 
+
+# ## Waveform Template
+# 
+# The results of a full LIGO-Virgo analysis of this BBH event include a set of parameters that are consistent with a range of parameterized waveform templates. Here we pick one for use in matched filtering. 
+# 
+# As noted above, the results won't be identical to what is in the LIGO-Virgo papers, since we're skipping many subtleties, such as combining many consistent templates.
+
+# In[13]:
+```{r read template}
+# read in the template (plus and cross) and parameters for the theoretical waveform
+#try:
+#f_template= read_xml(fn_template)
+#strain_H1 <- loadtemplate(fn_template, 'H1')[[1]]
+# extract metadata from the template file:
+template_p <- loadtemplate(fn_template)[[1]]
+template_c <- loadtemplate(fn_template)[[2]]
+t_m1 <- loadtemplate(fn_template)[[3]]
+t_m2 <- loadtemplate(fn_template)[[4]]
+t_a1 <- loadtemplate(fn_template)[[5]]
+t_a2 <- loadtemplate(fn_template)[[6]]
+t_approx <- loadtemplate(fn_template)[[7]]
+#template_c = f_template["template"][...]
+#t_m1 = f_template["/meta"].attrs['m1']
+#t_m2 = f_template["/meta"].attrs['m2']
+#t_a1 = f_template["/meta"].attrs['a1']
+#t_a2 = f_template["/meta"].attrs['a2']
+#t_approx = f_template["/meta"].attrs['approx']
+
+
+#f_template.close()
+# the template extends to roughly 16s, zero-padded to the 32s data length. The merger will be roughly 16s in.
+template_offset = 16.
+```
+
+```{r whiten the templates}
+# whiten the templates:
+template_p_whiten = whiten(template_p,psd_H1,dt)
+template_c_whiten = whiten(template_c,psd_H1,dt)
+template_p_whitenbp = filtfilt(bb, ab, template_p_whiten)
+template_c_whitenbp = filtfilt(bb, ab, template_c_whiten)
+
+```
+
+```{r properties of template}
+# Compute, print and plot some properties of the template:
+
+# constants:
+clight = 2.99792458e8                # m/s
+G = 6.67259e-11                      # m^3/kg/s^2 
+MSol = 1.989e30                      # kg
+
+# template parameters: masses in units of MSol:
+t_mtot = t_m1+t_m2
+# final BH mass is typically 95% of the total initial mass:
+t_mfin = t_mtot*0.95
+# Final BH radius, in km:
+R_fin = 2*G*t_mfin*MSol/clight**2/1000.
+
+# complex template:
+template = (template_p + template_c*1i) 
+ttime = time-time[0]-template_offset
+
+# compute the instantaneous frequency of this chirp-like signal:
+#tphase = np.unwrap(np.angle(template))
+#tphase = unwrap(angle(template))
+tphase0 = unwrap(Arg(template))
+#tphase = approxfun(,tphase0)
+#fGW = np.gradient(tphase)*fs/(2.*pi)
+#fGW = grad(tphase)*fs/(2.*pi)
+# fix discontinuities at the very end:
+#iffix = np.where(np.abs(np.gradient(fGW)) > 100.)[0]
+#iffix = which(abs(grad(fGW)>100))[0]
+#fGW[iffix] = fGW[iffix[0]-1]
+#fGW[np.where(fGW < 1.)] = fGW[iffix[0]-1]
+#fGW[which(fGW<1)] = fGW[iffic[0]-1]
+
+# compute v/c:
+#voverc = (G*t_mtot*MSol*np.pi*fGW/clight**3)**(1./3.)
+
+# index where f_GW is in-band:
+#f_inband = fband[0]
+#iband = np.where(fGW > f_inband)[0][0]
+# index at the peak of the waveform:
+#ipeak = np.argmax(np.abs(template))
+
+# number of cycles between inband and peak:
+#Ncycles = (tphase[ipeak]-tphase[iband])/(2.*np.pi)
+
+print("Properties of waveform template in {0}")
+print(fn_template)
+print("Waveform family = ")
+print(t_approx)
+print("Masses (Msun)= ")
+print(t_m1)
+print(t_m2)
+print("Mtot (Msun) = ")
+print(t_mtot)
+print("Mtot (Msun) = ")
+print(t_mfin)
+print("Spins = ")
+print(t_a1)
+print(t_a2)
+#print("Freq (Hz) at inband = ")
+#print(fGW[iband])
+#print("Freq (Hz) at peak =")
+#print(fGW[ipeak])
+#print("Time at inband")
+#print(ttime[iband])
+#print("Time at peak")
+#print(ttime[ipeak])
+#print("Duration (s) inband-peak =")
+#print(ttime[ipeak]-ttime[iband])
+#print("N_cycles inband-peak = ")
+#print(Ncycles)
+#print("v/c at peak = ")
+#print(voverc[ipeak])
+#print("Radius (km) of final BH =")
+#print(R_fin)
+
+#if make_plots:
+#    plt.figure(figsize=(10,16))
+#    plt.subplot(4,1,1)
+#    plt.plot(time-time[0]-template_offset,template_p)
+#    plt.xlim([-template_offset,1.])
+#    plt.grid()
+#    plt.xlabel('time (s)')
+#    plt.ylabel('strain')
+#    plt.title(eventname+' template at D_eff = 1 Mpc')
+#    
+#    plt.subplot(4,1,2)
+#    plt.plot(ttime,template_p)
+#    plt.xlim([-1.1,0.1])
+#    plt.grid()
+#    plt.xlabel('time (s)')
+#    plt.ylabel('strain')
+#    #plt.title(eventname+' template at D_eff = 1 Mpc')
+#    
+#    plt.subplot(4,1,3)
+#    plt.plot(ttime,fGW)
+#    plt.xlim([-1.1,0.1])
+#    plt.grid()
+#    plt.xlabel('time (s)')
+#    plt.ylabel('f_GW')
+#    #plt.title(eventname+' template f_GW')
+#    
+#    plt.subplot(4,1,4)
+#    plt.plot(ttime,voverc)
+#    plt.xlim([-1.1,0.1])
+#    plt.grid()
+#    plt.xlabel('time (s)')
+#    plt.ylabel('v/c')
+#    #plt.title(eventname+' template v/c')
+#    plt.savefig(eventname+'_template.'+plottype)
+```
+
+# ## Matched filtering to find the signal
+# 
+# Matched filtering is the optimal way to find a known signal buried in stationary, Gaussian noise. It is the standard technique used by the gravitational wave community to find GW signals from compact binary mergers in noisy detector data.
+# 
+# For some loud signals, it may be possible to see the signal in the whitened data or spectrograms. On the other hand, low signal-to-noise ratio (SNR) signals or signals which are of long duration in time may not be visible, even in the whitened data.  LIGO scientists use matched filtering to find such "hidden" signals. A matched filter works by compressing the entire signal into one time bin (by convention, the "end time" of the waveform).
+# 
+# LIGO uses a rather elaborate software suite to match the data against a family of such signal waveforms ("templates"), to find the best match. This procedure helps to "optimally" separate signals from instrumental noise, and to infer the parameters of the source (masses, spins, sky location, orbit orientation, etc) from the best match templates. 
+# 
+# A blind search requires us to search over many compact binary merger templates (eg, 250,000) with different masses and spins, as well as over all times in all detectors, and then requiring triggers coincident in time and template between detectors. It's an extremely complex and computationally-intensive "search pipeline".
+# 
+# Here, we simplify things, using only one template (the one identified in the full search as being a good match to the data). 
+# 
+# Assuming that the data around this event is fairly Gaussian and stationary, we'll use this simple method to identify the signal (matching the template) in our 32 second stretch of data. The peak in the SNR vs time is a "single-detector event trigger".
+# 
+# This calculation is described in section IV of:
+# FINDCHIRP: An algorithm for detection of gravitational waves from inspiraling compact binaries
+# B. Allen et al., PHYSICAL REVIEW D 85, 122006 (2012) ; http://arxiv.org/abs/gr-qc/0509116
+# 
+# The full search procedure is described in
+# GW150914: First results from the search for binary black hole coalescence with Advanced LIGO,
+# The LIGO Scientific Collaboration, the Virgo Collaboration, http://arxiv.org/abs/1602.03839
+
+# In[15]:
+
+# -- To calculate the PSD of the data, choose an overlap and a window (common to all detectors)
+#   that minimizes "spectral leakage" https://en.wikipedia.org/wiki/Spectral_leakage
+
+```{r matched filtering}
+NFFT = 4*fs
+psd_window = blackman(NFFT)
+# and a 50% overlap:
+NOVL = NFFT/2
+
+# define the complex template, common to both detectors:
+template = (template_p + template_c*1.i) 
+# We will record the time where the data match the END of the template.
+etime = time+template_offset
+# the length and sampling rate of the template MUST match that of the data.
+#datafreq = np.fft.fftfreq(template.size)*fs
+f_Nyquist <- 1 / 2 / dt
+datafreq <- f_Nyquist*c(seq(length(template)/2), -rev(seq(length(template)/2)))/(length(template)/2)
+
+df = abs(datafreq[2] - datafreq[1])
+
+# to remove effects at the beginning and end of the data stretch, window the data
+# https://en.wikipedia.org/wiki/Window_function#Tukey_window
+#try:   
+#dwindow = signal.tukey(template.size, alpha=1./8)  # Tukey window preferred, but requires recent scipy version 
+#except: dwindow = signal.blackman(template.size)          # Blackman window OK if Tukey is not available
+dwindow = tukeywindow(length(template), r = 1/8)
+# prepare the template fft.
+#template_fft = np.fft.fft(template*dwindow) / fs
+template_noNA <- template[!is.na(template)]
+template_fft = FRWDft(template_noNA*dwindow, length(template_noNA*dwindow), 0, dt)$G/fs
+# loop over the detectors
+dets = c("H1", "L1")
+for (det in dets)
+    {
+
+    if (det == "L1")
+      {
+      data = strain_L1
+      }else{           
+      data = strain_H1
+      }
+
+    # -- Calculate the PSD of the data.  Also use an overlap, and window:
+  
+    data_ts <- as.ts(as.numeric(data[[1]]), frequency = fs)
+
+    data_welchpsd <- welchPSD(data_ts, seglength=NFFT, windowingPsdCorrection = FALSE)
+    
+   data_psd <- data_welchpsd$power/fs
+   # data_psd <- data_welchpsd$power
+   freqs <- psdcore_H1$frequency*fs
+  #    freqs <- psdcore_H1$frequency
+    #data_psd, freqs = mlab.psd(data, Fs = fs, NFFT = NFFT, window=psd_window, noverlap=NOVL)
+
+    # Take the Fourier Transform (FFT) of the data and the template (with dwindow)
+    #data_fft = np.fft.fft(data*dwindow) / fs
+   data_fft = FRWDft(as.numeric(data[[1]])*dwindow, length(as.numeric(data[[1]])*dwindow), 0, dt)$G/fs
+    #data_fft = FRWDft(as.numeric(data[[1]]), length(data[[1]]), 0, dt)/fs
+
+    # -- Interpolate to get the PSD values at the needed frequencies
+   # power_vec = np.interp(np.abs(datafreq), freqs, data_psd)
+   # power_vec = approxfun(freqs, data_psd)
+   power_vec = interp1(freqs, data_psd, abs(datafreq))
+
+    # -- Calculate the matched filter output in the time domain:
+    # Multiply the Fourier Space template and data, and divide by the noise power in each frequency bin.
+    # Taking the Inverse Fourier Transform (IFFT) of the filter output puts it back in the time domain,
+    # so the result will be plotted as a function of time off-set between the template and the data:
+    optimal = data_fft * Conj(template_fft) / power_vec
+  #  optimal_time = 2*np.fft.ifft(optimal)*fs
+  optimal_time =2*INVRft(optimal, length(optimal),0,dt)$g*fs
+    # -- Normalize the matched filter output:
+    # Normalize the matched filter output so that we expect a value of 1 at times of just noise.
+    # Then, the peak of the matched filter output will tell us the signal-to-noise ratio (SNR) of the signal.
+    sigmasq = 1*Reduce("+",template_fft * Conj(template_fft)/ power_vec) * df
+    sigma = sqrt(abs(sigmasq))
+    SNR_complex = optimal_time/sigma
+
+    # shift the SNR vector by the template length so that the peak is at the END of the template
+    peaksample = as.integer(length(data) / 2)  # location of peak in the template
+   # SNR_complex = np.roll(SNR_complex,peaksample)
+    SNR_complex = SNR_complex[c(1+peaksample:length(SNR_complex),1:peaksample)]
+     
+    SNR = abs(SNR_complex)
+
+    # find the time and SNR value at maximum:
+   # indmax = np.argmax(SNR)
+    indmax = which.max(SNR)
+    timemax = time[indmax]
+    SNRmax = SNR[indmax]
+
+    # Calculate the "effective distance" (see FINDCHIRP paper for definition)
+    # d_eff = (8. / SNRmax)*D_thresh
+    d_eff = sigma / SNRmax
+    # -- Calculate optimal horizon distnace
+    horizon = sigma/8
+
+    # Extract time offset and phase at peak
+ #   phase = np.angle(SNR_complex[indmax])
+    phase = Arg(SNR_complex[indmax])
+    offset = (indmax-peaksample)
+    #print offset
+
+    # apply time offset, phase, and d_eff to whitened template, for plotting
+    template_whitened = (template_p_whitenbp + template_c_whitenbp*1.i) 
+    template_phaseshifted = Re(template_whitened*exp(1i*phase))
+   # template_match = np.roll(template_phaseshifted,offset) / d_eff
+    template_match = template_phaseshifted[c(1+offset:length(template_phaseshifted),1:offset)]/d_eff
+
+    print("For detector ")
+    print(det)
+    print("maximum at ")
+    print(timemax)
+    print("with SNR")
+    print(SNRmax)
+    print("D_eff")
+    print(d_eff)
+    print("horizon")
+    print(horizon)
+}
+
+#SNR_dataframe <- data.frame(SNR)
+#SNR_plot <- ggplot(SNR_dataframe, aes(indexed_time, as.numeric(indexed_strain_H1))) + geom_line() 
+# print(SNR_plot) 
+#    if make_plots:
+#
+#        # plotting changes for the detectors:
+#        if (det == "L1")
+#        {
+#            pcolor='g'
+#            strain_whitenbp = strain_L1_whitenbp
+#        }else{
+#            pcolor='r'
+#            strain_whitenbp = strain_H1_whitenbp
+#        }
+
+        # -- Plot the result
+#        plt.figure(figsize=(10,8))
+#        plt.subplot(2,1,1)
+#        plt.plot(time-timemax, SNR, pcolor,label=det+' SNR(t)')
+#        #plt.ylim([0,25.])
+#        plt.grid('on')
+#        plt.ylabel('SNR')
+#        plt.xlabel('Time since {0:.4f}'.format(timemax))
+#        plt.legend(loc='upper left')
+#        plt.title(det+' matched filter SNR around event')
+
+        # zoom in
+#        plt.subplot(2,1,2)
+#        plt.plot(time-timemax, SNR, pcolor,label=det+' SNR(t)')
+#        plt.grid('on')
+#        plt.ylabel('SNR')
+#        plt.xlim([-0.15,0.05])
+#        #plt.xlim([-0.3,+0.3])
+#        plt.grid('on')
+#        plt.xlabel('Time since {0:.4f}'.format(timemax))
+#        plt.legend(loc='upper left')
+#        plt.savefig(eventname+"_"+det+"_SNR."+plottype)
+
+#        plt.figure(figsize=(10,8))
+#        plt.subplot(2,1,1)
+#        plt.plot(time-tevent,strain_whitenbp,pcolor,label=det+' whitened h(t)')
+#        plt.plot(time-tevent,template_match,'k',label='Template(t)')
+#        plt.ylim([-3,3])
+#        plt.xlim([-0.15,0.05])
+#        plt.grid('on')
+#        plt.xlabel('Time since {0:.4f}'.format(timemax))
+#        plt.ylabel('whitened strain (units of noise stdev)')
+#        plt.legend(loc='upper left')
+#        plt.title(det+' whitened data around event')
+
+#        plt.subplot(2,1,2)
+#        plt.plot(time-tevent,strain_whitenbp-template_match,pcolor,label=det+' resid')
+#        plt.ylim([-3,3])
+#        plt.xlim([-0.15,0.05])
+#        plt.grid('on')
+#        plt.xlabel('Time since {0:.4f}'.format(timemax))
+#        plt.ylabel('whitened strain (units of noise stdev)')
+#        plt.legend(loc='upper left')
+#        plt.title(det+' Residual whitened data after subtracting template around event')
+#        plt.savefig(eventname+"_"+det+"_matchtime."+plottype)
+                 
+        # -- Display PSD and template
+        # must multiply by sqrt(f) to plot template fft on top of ASD:
+#        plt.figure(figsize=(10,6))
+#        template_f = np.absolute(template_fft)*np.sqrt(np.abs(datafreq)) / d_eff
+#        plt.loglog(datafreq, template_f, 'k', label='template(f)*sqrt(f)')
+#        plt.loglog(freqs, np.sqrt(data_psd),pcolor, label=det+' ASD')
+#        plt.xlim(20, fs/2)
+#        plt.ylim(1e-24, 1e-20)
+#        plt.grid()
+#        plt.xlabel('frequency (Hz)')
+#        plt.ylabel('strain noise ASD (strain/rtHz), template h(f)*rt(f)')
+#        plt.legend(loc='upper left')
+#        plt.title(det+' ASD and template around event')
+#        plt.savefig(eventname+"_"+det+"_matchfreq."+plottype)
+```
+
+# ### Notes on these results
+# 
+# * We make use of only one template, with a simple ASD estimate. The full analysis produces a Bayesian posterior result using many nearby templates. It does a more careful job estimating the ASD, and includes effects of uncertain calibration. 
+# * As a result, our parameters (SNR, masses, spins, D_eff) are somewhat different from what you will see in our papers.
+# * We compute an "effective distance" D_eff. Is is NOT an estimate of the actual (luminosity) distance, which depends also on the source location and orbit orientation.
+# * These distances are at non-zero redshift, so cosmological effects must be taken into account (neglected here). Since we estimate the BH masses using the phase evolution of the waveform, which has been redshifted, our masses are themselves "redshifted". The true source masses must be corrected for this effect; they are smaller by a factor (1+z).
+# 
+ 
+##
+## End emilie2 code
+##

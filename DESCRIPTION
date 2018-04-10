@@ -1,0 +1,27 @@
+Package: LIGOR
+Type: Package
+Title: A Package for an example of LIGO Data Usage in R 
+Version: 0.1.0
+Date: 2017-03-21
+Author: Emilie Martin Hein
+Maintainer: Emilie Martin Hein <emi.martin@gmail.com>
+Depends: R (>= 2.10)
+Imports:
+    Rcpp,
+    dplyr,
+    ggplot2,
+    magrittr,
+    XML,
+    xml2,
+    jsonlite,
+    gridExtra,
+    psd,
+    bspec,
+    numDeriv,
+    signal,
+    RSEIS
+Description: Provides functions to read and sort the LIGO data
+License: GPL-2
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.0.1
